@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Southwestern Ontario Beach Intelligence</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root{--bg:#07111f;--panel:#0d1b2e;--panel2:#122542;--text:#edf6ff;--muted:#9fb3c8;--cyan:#00d4ff;--lime:#52ff8f;--warn:#ffd166;--bad:#ff5e7a;}
+    *{box-sizing:border-box} body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Arial,sans-serif;background:radial-gradient(circle at top left,#12345d,#07111f 50%,#03070d);color:var(--text)}
+    header{padding:18px 22px;border-bottom:1px solid rgba(255,255,255,.08);display:flex;gap:16px;align-items:center;justify-content:space-between;background:rgba(3,7,13,.75);backdrop-filter:blur(10px);position:sticky;top:0;z-index:1000}
+    h1{font-size:20px;margin:0;letter-spacing:.5px}.sub{color:var(--muted);font-size:12px;margin-top:4px}.wrap{display:grid;grid-template-columns:370px 1fr;min-height:calc(100vh - 74px)}
+    aside{padding:16px;overflow:auto;border-right:1px solid rgba(255,255,255,.08);background:rgba(13,27,46,.78)}
+    #map{height:calc(100vh - 74px);width:100%;background:#061423}.card{background:linear-gradient(180deg,rgba(18,37,66,.92),rgba(8,18,33,.92));border:1px solid rgba(255,255,255,.1);box-shadow:0 18px 50px rgba(0,0,0,.25);border-radius:18px;padding:14px;margin-bottom:14px}.row{display:flex;justify-content:space-between;gap:8px;align-items:center;margin:8px 0}.metric{font-size:12px;color:var(--muted)}.value{font-weight:800}.score{font-size:44px;line-height:1;font-weight:900;letter-spacing:-2px}.badge{padding:6px 10px;border-radius:999px;font-size:12px;font-weight:800;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12)}
+    button,input,select{background:#09192c;color:var(--text);border:1px solid rgba(255,255,255,.16);border-radius:10px;padding:9px 10px}button{cursor:pointer;font-weight:800}button:hover{border-color:var(--cyan);box-shadow:0 0 0 3px rgba(0,212,255,.12)}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.beach-list{display:grid;gap:8px}.beach-item{padding:10px;border-radius:12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);cursor:pointer}.beach-item:hover{border-color:var(--cyan)}.bar{height:8px;background:rgba(255,255,255,.1);border-radius:999px;overflow:hidden}.fill{height:100%;background:linear-gradient(90deg,var(--bad),var(--warn),var(--lime));width:0%}.leaflet-popup-content-wrapper{background:#0d1b2e;color:#edf6ff;border:1px solid rgba(255,255,255,.15);border-radius:14px}.leaflet-popup-tip{background:#0d1b2e}.legend{position:absolute;right:12px;bottom:20px;z-index:900;background:rgba(7,17,31,.85);padding:10px;border-radius:12px;border:1px solid rgba(255,255,255,.1);font-size:12px}.small{font-size:11px;color:var(--muted);line-height:1.45}.pillrow{display:flex;flex-wrap:wrap;gap:6px}.toggle{display:flex;gap:8px;align-items:center}.heat-dot{width:12px;height:12px;border-radius:50%;display:inline-block;margin-right:6px}.danger{color:var(--bad)}.ok{color:var(--lime)}.warn{color:var(--warn)}
+    @media(max-width:900px){.wrap{grid-template-columns:1fr}#map{height:60vh}aside{border-right:0}.score{font-size:36px}}
+  </style>
+</head>
+<body>
+<header>
+  <div><h1>Beach Intelligence Dashboard</h1><div class="sub">KML beaches + live forecast + Bayesian updates + 10-year heat trend model</div></div>
+  <div class="pillrow"><span class="badge" id="status">Ready</span><button onclick="refreshAll()">Refresh Live Data</button></div>
+</header>
+<div class="wrap">
+  <aside>
+    <div class="card">
+      <div class="row"><div><b>Selected date</b><div class="small">Forecast scores work into the future. Historic trend uses past same-date weather.</div></div></div>
+      <div class="grid"><input id="date" type="date"><select id="hour"><option value="8">8 AM</option><option value="10">10 AM</option><option value="12" selected>Noon</option><option value="15">3 PM</option><option value="18">6 PM</option></select></div>
+      <div class="row"><button onclick="recalculate()">Recalculate</button><button onclick="toggleHeat()">Toggle Heatmap</button></div>
+    </div>
+    <div class="card" id="selectedCard"><div class="small">Click a beach marker to inspect live and historic scoring.</div></div>
+    <div class="card"><b>Bayesian prior controls</b><div class="small">This lets you update crowd probability from observed evidence.</div>
+      <div class="row"><span class="metric">Prior crowd probability</span><span id="priorLabel" class="value">40%</span></div><input type="range" min="5" max="95" value="40" id="prior" oninput="document.getElementById('priorLabel').textContent=this.value+'%';recalculate()" style="width:100%">
+      <div class="grid" style="margin-top:8px"><button onclick="addEvidence('traffic')">+ Traffic spike</button><button onclick="addEvidence('parking')">+ Parking pressure</button><button onclick="addEvidence('social')">+ Social/event signal</button><button onclick="resetEvidence()">Reset evidence</button></div>
+      <div class="small" id="evidenceBox">Evidence: none</div>
+    </div>
+    <div class="card"><b>Beach ranking</b><div class="beach-list" id="list"></div></div>
+  </aside>
+  <main style="position:relative"><div id="map"></div><div class="legend"><div><span class="heat-dot" style="background:#52ff8f"></span>Optimal</div><div><span class="heat-dot" style="background:#ffd166"></span>Mixed</div><div><span class="heat-dot" style="background:#ff5e7a"></span>Poor / crowded</div></div></main>
+</div>
+<script>
+const beaches = [{"name":"Sand Point Beach","lat":42.3383074,"lon":-82.9187863},{"name":"Lakeview Park West Beach","lat":42.2970806,"lon":-82.7112611},{"name":"Northwest Beach","lat":41.969468,"lon":-82.5359457},{"name":"Seacliff Beach","lat":42.029238,"lon":-82.6054961},{"name":"Cedar Beach Conservation Area","lat":42.11285095447418,"lon":-82.94351103782327},{"name":"Mettawas Park and Garden","lat":42.026497,"lon":-82.736811},{"name":"Colchester Beach","lat":41.9837361,"lon":-82.9341058},{"name":"Holiday Beach Conservation Area","lat":42.042247,"lon":-83.034999},{"name":"Unnamed Norfolk / Long Point area","lat":42.6117187,"lon":-80.2882277},{"name":"Muscamoot Bay","lat":42.6065,"lon":-82.699},{"name":"Unnamed Lake St. Clair point","lat":42.30183,"lon":-82.779733},{"name":"Unnamed Erieau / Chatham-Kent point","lat":42.2575156,"lon":-81.9147414},{"name":"Unnamed Lake Huron point","lat":43.3130397,"lon":-81.75622419999999},{"name":"Jobbie Nooner reference","lat":42.5381,"lon":-82.6766},{"name":"Gull Island reference","lat":42.53,"lon":-82.68},{"name":"Unnamed St. Clair / Sombra area","lat":42.472727,"lon":-82.405833}];
+let map=L.map('map',{zoomControl:false}).setView([42.25,-82.65],8);L.control.zoom({position:'bottomleft'}).addTo(map);L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
+let selected=0, heatOn=false, markers=[], circles=[], evidence=[]; const evidenceLR={traffic:1.8,parking:2.2,social:1.5};
+const today=new Date(); document.getElementById('date').value=today.toISOString().slice(0,10);
+function clamp(x,a,b){return Math.max(a,Math.min(b,x))} function sigmoid(x){return 1/(1+Math.exp(-x))}
+function color(score){return score>=78?'#52ff8f':score>=58?'#ffd166':'#ff5e7a'}
+function bayes(priorPct){let odds=(priorPct/100)/(1-priorPct/100); for(const e of evidence) odds*=evidenceLR[e]||1; return odds/(1+odds)}
+async function fetchForecast(b){
+ const url=`https://api.open-meteo.com/v1/forecast?latitude=${b.lat}&longitude=${b.lon}&hourly=temperature_2m,precipitation_probability,wind_speed_10m,cloud_cover,uv_index&daily=temperature_2m_max,precipitation_sum&timezone=America%2FToronto&forecast_days=16`;
+ const r=await fetch(url); if(!r.ok) throw new Error('forecast failed'); return r.json();
+}
+async function fetchHistoricTrend(b){
+ const date=document.getElementById('date').value; const d=new Date(date+'T12:00:00'); const years=[]; for(let y=d.getFullYear()-10;y<d.getFullYear();y++){years.push(`${y}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`)}
+ let scores=[]; for(const day of years.slice(-10)){
+  const url=`https://archive-api.open-meteo.com/v1/archive?latitude=${b.lat}&longitude=${b.lon}&start_date=${day}&end_date=${day}&daily=temperature_2m_max,precipitation_sum,wind_speed_10m_max&timezone=America%2FToronto`;
+  try{const j=await (await fetch(url)).json(); const t=j.daily?.temperature_2m_max?.[0]??22, rain=j.daily?.precipitation_sum?.[0]??0, wind=j.daily?.wind_speed_10m_max?.[0]??20; scores.push(qualityFrom({temp:t,rainProb:rain>1?70:10,wind,cloud:40,uv:6}));}catch(e){}
+ }
+ return scores.length?Math.round(scores.reduce((a,b)=>a+b,0)/scores.length):null;
+}
+function extractHour(f){const hour=Number(document.getElementById('hour').value); const date=document.getElementById('date').value; const key=`${date}T${String(hour).padStart(2,'0')}:00`; let i=f.hourly.time.findIndex(t=>t.startsWith(key)); if(i<0) i=0; return {temp:f.hourly.temperature_2m[i], rainProb:f.hourly.precipitation_probability[i]??0, wind:f.hourly.wind_speed_10m[i]??0, cloud:f.hourly.cloud_cover[i]??50, uv:f.hourly.uv_index[i]??5};}
+function qualityFrom(x){let temp=100-Math.abs((x.temp??24)-27)*7; let wind=100-(x.wind??15)*3.2; let rain=100-(x.rainProb??0); let cloud=100-Math.abs((x.cloud??40)-25)*1.1; let uv=(x.uv??6)>9?65:85; return Math.round(clamp(.34*temp+.22*wind+.22*rain+.12*cloud+.10*uv,0,100));}
+function crowdScore(x){const d=new Date(document.getElementById('date').value+'T12:00:00'); const weekend=[0,6].includes(d.getDay())?20:0; const holidayBoost=(d.getMonth()==6&&d.getDate()<=3)?15:0; const hot=(x.temp??22)>27?15:0; const noRain=(x.rainProb??0)<25?10:0; return Math.round(clamp((bayes(Number(document.getElementById('prior').value))*100)+weekend+holidayBoost+hot+noRain,0,100));}
+function finalScore(q,c,h){return Math.round(clamp(q*.65 + (100-c)*.25 + (h??q)*.10,0,100));}
+function markerIcon(score){return L.divIcon({className:'',html:`<div style="width:28px;height:28px;border-radius:50%;background:${color(score)};box-shadow:0 0 20px ${color(score)};border:2px solid white;color:#061423;font-weight:900;text-align:center;line-height:24px;font-size:11px">${score}</div>`,iconSize:[28,28],iconAnchor:[14,14]});}
+async function scoreBeach(i){const b=beaches[i]; let live={temp:24,rainProb:35,wind:12,cloud:40,uv:6}, hist=null, err=''; try{live=extractHour(await fetchForecast(b));}catch(e){err='Live forecast unavailable; using fallback values.'} try{hist=await fetchHistoricTrend(b)}catch(e){} const q=qualityFrom(live), c=crowdScore(live), s=finalScore(q,c,hist); return {...b,live,hist,q,c,s,err};}
+async function recalculate(){document.getElementById('status').textContent='Updating…'; const results=[]; for(let i=0;i<beaches.length;i++){results.push(await scoreBeach(i));} draw(results); document.getElementById('status').textContent='Live model updated';}
+function draw(results){markers.forEach(m=>map.removeLayer(m)); circles.forEach(c=>map.removeLayer(c)); markers=[]; circles=[]; results.forEach((r,i)=>{let m=L.marker([r.lat,r.lon],{icon:markerIcon(r.s)}).addTo(map).bindPopup(`<b>${r.name}</b><br>Final: ${r.s}/100<br>Quality: ${r.q}/100<br>Crowd risk: ${r.c}/100<br>10-year same-date heat: ${r.hist??'n/a'}/100`); m.on('click',()=>selectBeach(i,results)); markers.push(m); if(heatOn){circles.push(L.circle([r.lat,r.lon],{radius:6500,color:color(r.s),fillColor:color(r.s),fillOpacity:.22,weight:1}).addTo(map));}}); renderList(results); selectBeach(selected,results)}
+function renderList(results){document.getElementById('list').innerHTML=results.slice().sort((a,b)=>b.s-a.s).map(r=>`<div class="beach-item" onclick="map.setView([${r.lat},${r.lon}],12)"><div class="row"><b>${r.name}</b><span class="value">${r.s}</span></div><div class="bar"><div class="fill" style="width:${r.s}%"></div></div><div class="small">Quality ${r.q} · Crowd ${r.c} · Historic ${r.hist??'n/a'}</div></div>`).join('')}
+function selectBeach(i,results){selected=i; const r=results[i]; if(!r)return; document.getElementById('selectedCard').innerHTML=`<div class="row"><div><b>${r.name}</b><div class="small">${r.lat.toFixed(5)}, ${r.lon.toFixed(5)}</div></div><div class="score" style="color:${color(r.s)}">${r.s}</div></div><div class="grid"><div><span class="metric">Beach quality</span><div class="value">${r.q}/100</div></div><div><span class="metric">Crowd risk</span><div class="value">${r.c}/100</div></div><div><span class="metric">Temp</span><div class="value">${Math.round(r.live.temp)}°C</div></div><div><span class="metric">Wind</span><div class="value">${Math.round(r.live.wind)} km/h</div></div><div><span class="metric">Rain risk</span><div class="value">${Math.round(r.live.rainProb)}%</div></div><div><span class="metric">10-year heat</span><div class="value">${r.hist??'n/a'}</div></div></div><div class="small ${r.err?'warn':''}">${r.err||'Forecast and Bayesian model loaded.'}</div><canvas id="miniChart" height="130"></canvas>`; setTimeout(()=>new Chart(document.getElementById('miniChart'),{type:'radar',data:{labels:['Quality','Low crowd','Historic','Temp','Wind comfort'],datasets:[{label:'Beach fit',data:[r.q,100-r.c,r.hist??r.q,clamp((r.live.temp/30)*100,0,100),clamp(100-r.live.wind*3,0,100)]}]},options:{plugins:{legend:{display:false}},scales:{r:{min:0,max:100,ticks:{display:false},grid:{color:'rgba(255,255,255,.15)'},angleLines:{color:'rgba(255,255,255,.12)'},pointLabels:{color:'#9fb3c8'}}}}),30)}
+function addEvidence(e){evidence.push(e); document.getElementById('evidenceBox').textContent='Evidence: '+evidence.join(', '); recalculate()} function resetEvidence(){evidence=[];document.getElementById('evidenceBox').textContent='Evidence: none';recalculate()} function toggleHeat(){heatOn=!heatOn;recalculate()} async function refreshAll(){await recalculate()}
+recalculate();
+</script>
+</body>
+</html>
